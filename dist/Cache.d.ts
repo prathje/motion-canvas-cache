@@ -20,6 +20,13 @@ export declare class Cache {
     static getInstance(): Cache;
     private initializeHMR;
     get(cacheKey: CacheKey): CachedResult | null;
+    /**
+     * Check if a cache key exists in memory cache (synchronous)
+     *
+     * @param cacheKey - The cache key to check
+     * @returns true if the key exists in memory cache
+     */
+    has(cacheKey: CacheKey): boolean;
     private set;
     cacheResult(cacheKey: CacheKey, url: string, metadata?: Record<string, any>): void;
     /**
@@ -44,7 +51,7 @@ export interface CachedOptions {
     fetchOptions?: RequestInit;
 }
 /**
- * Convenience method to cache a file from a URL
+ * Async function to fetch and cache a file from a URL
  *
  * @param input - URL to fetch (string, URL object, or Request object)
  * @param options - Optional configuration
@@ -53,19 +60,25 @@ export interface CachedOptions {
  *   - cacheKeyOptions: Additional options for cache key generation
  *   - cacheKey: Override the automatically generated cache key
  *   - fetchOptions: Additional options to pass to fetch()
- * @returns Promise<string> - The cached URL (blob URL or server path)
+ * @returns Promise that resolves to the cached URL (blob URL or server path)
  *
  * @example
- * // Cache an image from a URL string
- * const imageUrl = await cached('https://example.com/image.png', {
- *   metadata: { width: 800, height: 600 },
- *   mimeType: 'image/png'
+ * // In Motion Canvas, use yield to await the promise
+ * export default makeScene2D(function* (view) {
+ *   // Preload the image
+ *   yield cache('https://example.com/image.png', {
+ *     metadata: { width: 800, height: 600 },
+ *     mimeType: 'image/png'
+ *   });
+ *
+ *   // Use synchronously in JSX
+ *   view.add(<Img src={cached('https://example.com/image.png')} />);
  * });
  *
  * @example
  * // Cache with URL object
  * const url = new URL('https://example.com/image.png');
- * const imageUrl = await cached(url);
+ * yield cache(url);
  *
  * @example
  * // Cache with Request object
@@ -73,14 +86,14 @@ export interface CachedOptions {
  *   method: 'POST',
  *   body: JSON.stringify({text: 'Hello'}),
  * });
- * const audioUrl = await cached(request, {
+ * yield cache(request, {
  *   cacheKey: 'my-custom-key',
  *   metadata: { duration: 3.5 }
  * });
  *
  * @example
  * // Cache with fetch options
- * const audioUrl = await cached('https://api.tts.com/generate', {
+ * yield cache('https://api.tts.com/generate', {
  *   fetchOptions: {
  *     method: 'POST',
  *     headers: { 'Content-Type': 'application/json' },
@@ -88,10 +101,37 @@ export interface CachedOptions {
  *   },
  *   metadata: { duration: 3.5 }
  * });
- *
- * // Use in Motion Canvas
- * view.add(<Img src={imageUrl} />);
  */
-export declare function cached(input: string | URL | Request, options?: CachedOptions): Promise<string>;
+export declare function cache(input: string | URL | Request, options?: CachedOptions): Promise<string>;
+/**
+ * Synchronously get a cached URL (no async/yield needed)
+ *
+ * @param input - URL to check (string, URL object, or Request object)
+ * @param options - Optional configuration (same as cache function)
+ * @returns The cached URL if found, otherwise null
+ *
+ * @example
+ * // Use directly in JSX without yield
+ * export default makeScene2D(function* (view) {
+ *   // Preload first
+ *   yield cache('https://example.com/image.png');
+ *
+ *   // Use synchronously in JSX - no yield needed!
+ *   view.add(<Img src={cached('https://example.com/image.png')} />);
+ * });
+ *
+ * @example
+ * // Conditional loading
+ * export default makeScene2D(function* (view) {
+ *   const url = 'https://example.com/image.png';
+ *
+ *   if (!cached(url)) {
+ *     yield cache(url);
+ *   }
+ *
+ *   view.add(<Img src={cached(url)} />);
+ * });
+ */
+export declare function cached(input: string | URL | Request, options?: CachedOptions): string | null;
 export {};
 //# sourceMappingURL=Cache.d.ts.map
