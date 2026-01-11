@@ -31,9 +31,6 @@
   ],
   "author": "Patrick Rathje",
   "license": "MIT",
-  "peerDependencies": {
-    "vite": "^5.0.0"
-  },
   "files": [
     "dist/**/*"
   ],
