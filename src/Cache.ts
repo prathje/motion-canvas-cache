@@ -17,6 +17,23 @@ export interface CachedResult {
 
 type CacheKey = string;
 
+/**
+ * Options for caching operations
+ */
+export interface CacheOptions {
+  cacheKey?: string;
+  metadata?: Record<string, any>;
+  mimeType?: string;
+  fetchOptions?: RequestInit;
+}
+
+/**
+ * Cache options with required cacheKey (used by cacheBlob and cacheArrayBuffer)
+ */
+export interface CacheOptionsWithKey extends Omit<CacheOptions, 'cacheKey' | 'fetchOptions'> {
+  cacheKey: string;
+}
+
 export class Cache {
   private static instance: Cache | null = null;
   private cache = new Map<CacheKey, CachedResult>();
@@ -151,37 +168,119 @@ export class Cache {
   }
 
   /**
-   * Cache a Blob with optional metadata and MIME type
+   * Cache a Blob (base caching method)
    *
-   * @param cacheKey - The cache key to store the blob under
    * @param blob - The Blob to cache
-   * @param metadata - Optional metadata to store with the cached blob
-   * @param mimeType - Optional MIME type override (uses blob.type if not provided)
+   * @param options - Cache options (cacheKey is required, metadata, mimeType)
    * @returns The blob URL that can be used to reference the cached blob
    */
   public async cacheBlob(
-    cacheKey: CacheKey,
     blob: Blob,
-    metadata?: Record<string, any>,
-    mimeType?: string,
+    options: CacheOptionsWithKey,
   ): Promise<string> {
-    const finalMimeType = mimeType || blob.type || 'application/octet-stream';
+    const finalMimeType = options.mimeType || blob.type || 'application/octet-stream';
+    const {cacheKey} = options;
 
     // Create a blob URL for in-memory cache
     const blobUrl = URL.createObjectURL(blob);
 
     // Cache in memory
-    this.cacheResult(cacheKey, blobUrl, metadata);
-
-    // Convert blob to ArrayBuffer for upload
-    const arrayBuffer = await blob.arrayBuffer();
+    this.cacheResult(cacheKey, blobUrl, options.metadata);
 
     // Upload to server cache (async, non-blocking)
-    this.uploadToServer(cacheKey, arrayBuffer, finalMimeType, metadata).catch(error => {
+    // Convert to ArrayBuffer for server upload
+    blob.arrayBuffer().then(arrayBuffer => {
+      this.uploadToServer(cacheKey, arrayBuffer, finalMimeType, options.metadata).catch(error => {
+        console.warn('Failed to upload to server cache:', error);
+      });
+    });
+
+    return blobUrl;
+  }
+
+  /**
+   * Cache an ArrayBuffer (calls cacheBlob)
+   *
+   * @param arrayBuffer - The ArrayBuffer to cache
+   * @param options - Cache options (cacheKey is required, metadata, mimeType)
+   * @returns The blob URL that can be used to reference the cached data
+   */
+  public async cacheArrayBuffer(
+    arrayBuffer: ArrayBuffer,
+    options: CacheOptionsWithKey,
+  ): Promise<string> {
+    const mimeType = options.mimeType || 'application/octet-stream';
+    const {cacheKey} = options;
+    const blob = new Blob([arrayBuffer], {type: mimeType});
+
+    // Create a blob URL for in-memory cache
+    const blobUrl = URL.createObjectURL(blob);
+
+    // Cache in memory
+    this.cacheResult(cacheKey, blobUrl, options.metadata);
+
+    // Upload to server cache (async, non-blocking)
+    this.uploadToServer(cacheKey, arrayBuffer, mimeType, options.metadata).catch(error => {
       console.warn('Failed to upload to server cache:', error);
     });
 
     return blobUrl;
+  }
+
+  /**
+   * Cache a URL by fetching and caching the response (calls cacheArrayBuffer)
+   *
+   * @param input - The URL to fetch and cache (string, URL object, or Request object)
+   * @param options - Cache options (cacheKey, metadata, mimeType, fetchOptions)
+   * @returns The blob URL that can be used to reference the cached data
+   */
+  public async cacheUrl(
+    input: string | URL,
+    options: CacheOptions = {},
+  ): Promise<string> {
+    // Convert input to string URL
+    const urlString = input instanceof URL ? input.toString() : input;
+
+    // Generate cache key if not provided
+    const cacheKey = options.cacheKey || CacheUtils.generateCacheKey(urlString, []);
+
+    // Check in-memory cache first
+    const cachedResult = this.get(cacheKey);
+    if (cachedResult) {
+      console.log(`Found in memory cache for ${cacheKey}`);
+      return cachedResult.url;
+    }
+
+    // Check server cache
+    const serverResult = await this.checkServerCache(cacheKey);
+    if (serverResult) {
+      console.log(`Found in server cache for ${cacheKey}`);
+      return serverResult.url;
+    }
+
+    // Not in cache - fetch from URL
+    console.log(`Fetching from URL: ${urlString}`);
+
+    // Fetch with optional fetchOptions
+    const response = options.fetchOptions
+        ? await fetch(urlString, options.fetchOptions)
+        : await fetch(urlString);
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${urlString}: ${response.status} ${response.statusText}`);
+    }
+
+    // Auto-detect MIME type from response headers if not provided
+    const contentType = response.headers.get('content-type');
+    const mimeType = options.mimeType || contentType || 'application/octet-stream';
+
+    const arrayBuffer = await response.arrayBuffer();
+
+    return this.cacheArrayBuffer(arrayBuffer, {
+      cacheKey,
+      metadata: options.metadata,
+      mimeType,
+    });
   }
 
   public async checkServerCache(
@@ -193,6 +292,7 @@ export class Cache {
 
     // Wait for server availability with timeout
     const serverAvailable = await this.serverAvailablePromise;
+
     if (!serverAvailable) {
       return null;
     }
@@ -288,16 +388,6 @@ export interface CachedOptions {
  * const url = new URL('https://example.com/image.png');
  * yield cache(url);
  *
- * @example
- * // Cache with Request object
- * const request = new Request('https://api.tts.com/generate', {
- *   method: 'POST',
- *   body: JSON.stringify({text: 'Hello'}),
- * });
- * yield cache(request, {
- *   cacheKey: 'my-custom-key',
- *   metadata: { duration: 3.5 }
- * });
  *
  * @example
  * // Cache with fetch options
@@ -311,73 +401,29 @@ export interface CachedOptions {
  * });
  */
 export async function cache(
-  input: string | URL | Request,
+  input: string | URL,
   options: CachedOptions = {}
 ): Promise<string> {
-  // Use the singleton cache instance
   const cacheInstance = Cache.getInstance();
 
-  // Convert input to string for cache key generation
-  let urlString: string;
-  if (input instanceof Request) {
-    urlString = input.url;
-  } else if (input instanceof URL) {
-    urlString = input.toString();
-  } else {
-    urlString = input;
-  }
+  // Convert input to string URL for cache key generation
+  const urlString = input instanceof URL ? input.toString() : input;
 
   // Warn if both cacheKey and cacheKeyOptions are provided
   if (options.cacheKey && options.cacheKeyOptions && options.cacheKeyOptions.length > 0) {
     console.warn('Both cacheKey and cacheKeyOptions were provided. cacheKeyOptions will be ignored.');
   }
 
-  // Use provided cache key or generate from URL and options
+  // Generate cache key if not provided
   const cacheKey = options.cacheKey || CacheUtils.generateCacheKey(urlString, options.cacheKeyOptions || []);
 
-  // Check in-memory cache first
-  const cachedResult = cacheInstance.get(cacheKey);
-  if (cachedResult) {
-    console.log(`Found in memory cache for ${cacheKey}`);
-    return cachedResult.url;
-  }
-
-  // Check server cache
-  const serverResult = await cacheInstance.checkServerCache(cacheKey);
-  if (serverResult) {
-    console.log(`Found in server cache for ${cacheKey}`);
-    return serverResult.url;
-  }
-
-  // Not in cache - fetch from URL
-  console.log(`Fetching from URL: ${urlString}`);
-  const response = await fetch(input, options.fetchOptions);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${urlString}: ${response.status} ${response.statusText}`);
-  }
-
-  // Auto-detect MIME type from response headers
-  const contentType = response.headers.get('content-type');
-  const mimeType = options.mimeType || contentType || 'application/octet-stream';
-
-  const blob = await response.blob();
-
-  // Convert blob to ArrayBuffer for upload
-  const arrayBuffer = await blob.arrayBuffer();
-
-  // Create a blob URL for in-memory cache
-  const blobUrl = URL.createObjectURL(blob);
-
-  // Cache in memory
-  cacheInstance.cacheResult(cacheKey, blobUrl, options.metadata);
-
-  // Upload to server cache (async, non-blocking)
-  cacheInstance.uploadToServer(cacheKey, arrayBuffer, mimeType, options.metadata).catch(error => {
-    console.warn('Failed to upload to server cache:', error);
+  // Delegate to cacheUrl (which handles all input types)
+  return cacheInstance.cacheUrl(input, {
+    cacheKey,
+    metadata: options.metadata,
+    mimeType: options.mimeType,
+    fetchOptions: options.fetchOptions,
   });
-
-  return blobUrl;
 }
 
 /**
@@ -410,16 +456,14 @@ export async function cache(
  * });
  */
 export function cached(
-  input: string | URL | Request,
+  input: string | URL,
   options: CachedOptions = {}
 ): string | null {
   const cacheInstance = Cache.getInstance();
 
   // Convert input to string for cache key generation
   let urlString: string;
-  if (input instanceof Request) {
-    urlString = input.url;
-  } else if (input instanceof URL) {
+  if (input instanceof URL) {
     urlString = input.toString();
   } else {
     urlString = input;

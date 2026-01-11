@@ -67,7 +67,7 @@ describe('Cache', () => {
       const cacheKey = 'test-blob-key';
       const metadata = {source: 'test'};
 
-      const blobUrl = await cacheInstance.cacheBlob(cacheKey, blob, metadata);
+      const blobUrl = await cacheInstance.cacheBlob(blob, {cacheKey, metadata});
 
       expect(blobUrl).toBe('blob:mock-url');
       expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
@@ -84,7 +84,7 @@ describe('Cache', () => {
       const blob = new Blob(['test'], {type: 'application/json'});
       const cacheKey = 'json-key';
 
-      await cacheInstance.cacheBlob(cacheKey, blob);
+      await cacheInstance.cacheBlob(blob, {cacheKey});
 
       // Verify it was cached
       const cached = cacheInstance.get(cacheKey);
@@ -96,9 +96,54 @@ describe('Cache', () => {
       const blob = new Blob(['test'], {type: 'text/plain'});
       const cacheKey = 'override-key';
 
-      await cacheInstance.cacheBlob(cacheKey, blob, undefined, 'application/json');
+      await cacheInstance.cacheBlob(blob, {cacheKey, mimeType: 'application/json'});
 
       // Verify it was cached
+      const cached = cacheInstance.get(cacheKey);
+      expect(cached).toBeDefined();
+    });
+  });
+
+  describe('cacheArrayBuffer', () => {
+    it('should cache an ArrayBuffer and return its URL', async () => {
+      const cacheInstance = Cache.getInstance();
+      const data = new TextEncoder().encode('test content');
+      const arrayBuffer = data.buffer;
+      const cacheKey = 'test-buffer-key';
+      const metadata = {source: 'test'};
+
+      const blobUrl = await cacheInstance.cacheArrayBuffer(arrayBuffer, {
+        cacheKey,
+        metadata,
+        mimeType: 'text/plain',
+      });
+
+      expect(blobUrl).toBe('blob:mock-url');
+      const cached = cacheInstance.get(cacheKey);
+      expect(cached).toEqual({
+        url: 'blob:mock-url',
+        metadata,
+      });
+    });
+  });
+
+  describe('cacheUrl', () => {
+    it('should fetch and cache a URL', async () => {
+      const mockBlob = new Blob(['test content'], {type: 'text/plain'});
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        headers: {get: () => 'text/plain'},
+        arrayBuffer: () => Promise.resolve(new TextEncoder().encode('test content').buffer),
+      });
+
+      const cacheInstance = Cache.getInstance();
+      const url = 'https://example.com/test.txt';
+      const cacheKey = 'test-url-key';
+
+      const blobUrl = await cacheInstance.cacheUrl(url, {cacheKey});
+
+      expect(blobUrl).toBe('blob:mock-url');
+      expect(global.fetch).toHaveBeenCalled();
       const cached = cacheInstance.get(cacheKey);
       expect(cached).toBeDefined();
     });
@@ -120,13 +165,14 @@ describe('cache', () => {
         get: () => 'text/plain',
       },
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
     const result = await cache(url);
 
     expect(result).toBe('blob:mock-url');
-    expect(global.fetch).toHaveBeenCalledWith(url, undefined);
+    expect(global.fetch).toHaveBeenCalledWith(url);
   });
 
   it('should return cached URL on subsequent calls', async () => {
@@ -135,6 +181,7 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
@@ -155,6 +202,7 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
@@ -176,6 +224,7 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     await cache('https://example.com/test.txt', {
@@ -196,6 +245,7 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
@@ -216,6 +266,7 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
@@ -236,6 +287,7 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
@@ -266,32 +318,14 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = new URL('https://example.com/test.txt');
     const result = await cache(url);
 
     expect(result).toBe('blob:mock-url');
-    expect(global.fetch).toHaveBeenCalledWith(url, undefined);
-  });
-
-  it('should accept Request object', async () => {
-    const mockBlob = new Blob(['test'], {type: 'application/json'});
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: true,
-      headers: {get: () => 'application/json'},
-      blob: () => Promise.resolve(mockBlob),
-    });
-
-    const request = new Request('https://api.example.com/data', {
-      method: 'POST',
-      body: JSON.stringify({key: 'value'}),
-    });
-
-    const result = await cache(request);
-
-    expect(result).toBe('blob:mock-url');
-    expect(global.fetch).toHaveBeenCalledWith(request, undefined);
+    expect(global.fetch).toHaveBeenCalledWith(url.toString());
   });
 
   it('should pass fetchOptions to fetch', async () => {
@@ -300,6 +334,7 @@ describe('cache', () => {
       ok: true,
       headers: {get: () => 'application/json'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://api.example.com/data';
@@ -334,6 +369,7 @@ describe('cached', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
@@ -353,6 +389,7 @@ describe('cached', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/test.txt';
@@ -376,6 +413,7 @@ describe('cached', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = 'https://example.com/audio.mp3';
@@ -399,6 +437,7 @@ describe('cached', () => {
       ok: true,
       headers: {get: () => 'text/plain'},
       blob: () => Promise.resolve(mockBlob),
+      arrayBuffer: () => mockBlob.arrayBuffer(),
     });
 
     const url = new URL('https://example.com/test.txt');
