@@ -1,6 +1,6 @@
 {
   "name": "motion-canvas-cache",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A generic file caching library for Motion Canvas projects with in-memory and server-side caching via Vite HMR",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
