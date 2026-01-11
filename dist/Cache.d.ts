@@ -11,6 +11,21 @@ export interface CachedResult {
     metadata?: Record<string, any>;
 }
 type CacheKey = string;
+/**
+ * Options for caching operations
+ */
+export interface CacheOptions {
+    cacheKey?: string;
+    metadata?: Record<string, any>;
+    mimeType?: string;
+    fetchOptions?: RequestInit;
+}
+/**
+ * Cache options with required cacheKey (used by cacheBlob and cacheArrayBuffer)
+ */
+export interface CacheOptionsWithKey extends Omit<CacheOptions, 'cacheKey' | 'fetchOptions'> {
+    cacheKey: string;
+}
 export declare class Cache {
     private static instance;
     private cache;
@@ -30,15 +45,29 @@ export declare class Cache {
     private set;
     cacheResult(cacheKey: CacheKey, url: string, metadata?: Record<string, any>): void;
     /**
-     * Cache a Blob with optional metadata and MIME type
+     * Cache a Blob (base caching method)
      *
-     * @param cacheKey - The cache key to store the blob under
      * @param blob - The Blob to cache
-     * @param metadata - Optional metadata to store with the cached blob
-     * @param mimeType - Optional MIME type override (uses blob.type if not provided)
+     * @param options - Cache options (cacheKey is required, metadata, mimeType)
      * @returns The blob URL that can be used to reference the cached blob
      */
-    cacheBlob(cacheKey: CacheKey, blob: Blob, metadata?: Record<string, any>, mimeType?: string): Promise<string>;
+    cacheBlob(blob: Blob, options: CacheOptionsWithKey): Promise<string>;
+    /**
+     * Cache an ArrayBuffer (calls cacheBlob)
+     *
+     * @param arrayBuffer - The ArrayBuffer to cache
+     * @param options - Cache options (cacheKey is required, metadata, mimeType)
+     * @returns The blob URL that can be used to reference the cached data
+     */
+    cacheArrayBuffer(arrayBuffer: ArrayBuffer, options: CacheOptionsWithKey): Promise<string>;
+    /**
+     * Cache a URL by fetching and caching the response (calls cacheArrayBuffer)
+     *
+     * @param input - The URL to fetch and cache (string, URL object, or Request object)
+     * @param options - Cache options (cacheKey, metadata, mimeType, fetchOptions)
+     * @returns The blob URL that can be used to reference the cached data
+     */
+    cacheUrl(input: string | URL, options?: CacheOptions): Promise<string>;
     checkServerCache(cacheKey: CacheKey): Promise<CachedResult | null>;
     uploadToServer(cacheKey: CacheKey, data: ArrayBuffer, mimeType: string, metadata?: Record<string, any>): Promise<void>;
     streamToArrayBuffer(stream: ReadableStream): Promise<ArrayBuffer>;
@@ -80,16 +109,6 @@ export interface CachedOptions {
  * const url = new URL('https://example.com/image.png');
  * yield cache(url);
  *
- * @example
- * // Cache with Request object
- * const request = new Request('https://api.tts.com/generate', {
- *   method: 'POST',
- *   body: JSON.stringify({text: 'Hello'}),
- * });
- * yield cache(request, {
- *   cacheKey: 'my-custom-key',
- *   metadata: { duration: 3.5 }
- * });
  *
  * @example
  * // Cache with fetch options
@@ -102,7 +121,7 @@ export interface CachedOptions {
  *   metadata: { duration: 3.5 }
  * });
  */
-export declare function cache(input: string | URL | Request, options?: CachedOptions): Promise<string>;
+export declare function cache(input: string | URL, options?: CachedOptions): Promise<string>;
 /**
  * Synchronously get a cached URL (no async/yield needed)
  *
@@ -132,6 +151,6 @@ export declare function cache(input: string | URL | Request, options?: CachedOpt
  *   view.add(<Img src={cached(url)} />);
  * });
  */
-export declare function cached(input: string | URL | Request, options?: CachedOptions): string | null;
+export declare function cached(input: string | URL, options?: CachedOptions): string | null;
 export {};
 //# sourceMappingURL=Cache.d.ts.map
